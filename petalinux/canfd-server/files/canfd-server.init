@@ -1,0 +1,59 @@
+#!/bin/sh
+#
+# /etc/init.d/canfd-server
+# Start the CANFD-over-TCP service after the xilinx_can netdevs appear.
+#
+### BEGIN INIT INFO
+# Provides:          canfd-server
+# Required-Start:    $local_fs $network
+# Required-Stop:     $local_fs $network
+# Default-Start:     5
+# Default-Stop:      0 6
+# Short-Description: ZYNQ CANFD SocketCAN TCP service
+### END INIT INFO
+
+DAEMON=/usr/bin/canfd_server
+PIDFILE=/var/run/canfd_server.pid
+LOGFILE=/var/log/canfd_server.log
+
+is_running() {
+    [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null
+}
+
+start() {
+    is_running && return 0
+    [ -x "$DAEMON" ] || {
+        echo "$DAEMON not found"
+        return 1
+    }
+
+    # Driver probe is asynchronous; wait briefly for can0 to be registered.
+    i=0
+    while [ $i -lt 10 ]; do
+        [ -d /sys/class/net/can0 ] && break
+        sleep 1
+        i=$((i + 1))
+    done
+
+    echo "starting canfd_server"
+    nohup "$DAEMON" >"$LOGFILE" 2>&1 &
+    echo $! >"$PIDFILE"
+    return 0
+}
+
+stop() {
+    if is_running; then
+        echo "stopping canfd_server"
+        kill "$(cat "$PIDFILE")" 2>/dev/null
+        sleep 1
+    fi
+    rm -f "$PIDFILE"
+}
+
+case "$1" in
+    start)   start ;;
+    stop)    stop ;;
+    restart) stop; start ;;
+    *)       echo "usage: $0 {start|stop|restart}"; exit 1 ;;
+esac
+exit 0
