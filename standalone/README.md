@@ -56,8 +56,8 @@ ip -details link show can0
 
 ```sh
 ip link set can0 down
-ip link set can0 type can bitrate 500000 sample-point 0.875 \
-    dbitrate 2000000 dsample-point 0.750 fd on loopback off
+ip link set can0 type can bitrate 500000 sample-point 0.800 \
+    dbitrate 2000000 dsample-point 0.800 fd on loopback off
 ip link set can0 up
 ```
 
@@ -101,7 +101,8 @@ chmod +x /home/root/canfd_server
 2. 9009 发 0x0101 初始化包。
 3. 9009 发 0x0103，状态 0xAA 打开通道。
 4. 9012 发 0x0001 + 112 字节 CANFD 包。
-5. 9010 收 0x0080，`States=1`；CAN 总线上出现帧。
+5. 9010 收 0x0080，报文为 16 字节网络头 + 4 字节通道号 + 112 字节 CAN FD 状态帧；
+   `States=1` 表示本次发送成功。0x0081 接收上报使用同样的外层封装。
 
 程序内部调用链：
 

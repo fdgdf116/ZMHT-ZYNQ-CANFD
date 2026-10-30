@@ -18,6 +18,20 @@ uint32_t le32(const uint8_t* p)
            (static_cast<uint32_t>(p[3]) << 24);
 }
 
+/* Some deployed host tools encoded the channel field of CMD_CAN_START_STOP
+ * as little-endian, while the protocol uses big-endian.  Keep the wire
+ * format canonical (big-endian), but accept the old form when the canonical
+ * value cannot be a valid channel. */
+uint32_t start_stop_channel(const uint8_t* p)
+{
+    const uint32_t be = canfd_get_be32(p);
+    if (be < CANFD_CHANNEL_COUNT) {
+        return be;
+    }
+    const uint32_t le = le32(p);
+    return le < CANFD_CHANNEL_COUNT ? le : be;
+}
+
 void print_config_frame(const uint8_t* p, uint32_t length, const char* result)
 {
     std::printf("[CANFD CONFIG] %s\n", result);
@@ -34,7 +48,7 @@ void print_config_frame(const uint8_t* p, uint32_t length, const char* result)
     std::printf("  raw    : baud=%02X %02X %02X %02X data_baud=%02X %02X %02X %02X\n",
                 p[16], p[17], p[18], p[19], p[28], p[29], p[30], p[31]);
     std::printf("  checksum: frame=0x%08X calculated=0x%08X\n",
-                canfd_get_be32(p + 108), canfd_xor(p, 108));
+                le32(p + 108), canfd_xor(p, 108));
 }
 
 std::mutex g_state_mu;
@@ -73,14 +87,21 @@ void send_tx_feedback(const uint8_t* frame, bool ok)
     feedback[96] = ok ? 1 : 0;                           /* States */
     feedback[97] = 1;                                    /* XOR_States: input was valid */
     write_be64(feedback + 100, now_us());
-    canfd_put_be32(feedback + 108, canfd_xor(feedback, 108));
+    const uint32_t checksum = canfd_xor(feedback, 108);
+    feedback[108] = static_cast<uint8_t>(checksum);
+    feedback[109] = static_cast<uint8_t>(checksum >> 8);
+    feedback[110] = static_cast<uint8_t>(checksum >> 16);
+    feedback[111] = static_cast<uint8_t>(checksum >> 24);
     (void)canfd_send_uplink(UPLINK_INDEX_STATUS, feedback, CANFD_FRAME_SIZE);
 }
 
 void put_status(std::vector<uint8_t>* dest, uint32_t status)
 {
     uint8_t bytes[4];
-    canfd_put_be32(bytes, status);
+    bytes[0] = static_cast<uint8_t>(status);
+    bytes[1] = static_cast<uint8_t>(status >> 8);
+    bytes[2] = static_cast<uint8_t>(status >> 16);
+    bytes[3] = static_cast<uint8_t>(status >> 24);
     dest->assign(bytes, bytes + 4);
 }
 
@@ -89,12 +110,16 @@ bool checksum_ok(const uint8_t* frame, size_t size)
     if (frame == nullptr || size < 4 || (size % 4) != 0) {
         return false;
     }
-    return canfd_xor(frame, size - 4) == canfd_get_be32(frame + size - 4);
+    return canfd_xor(frame, size - 4) == le32(frame + size - 4);
 }
 
 void write_checksum(uint8_t* frame, size_t size)
 {
-    canfd_put_be32(frame + size - 4, canfd_xor(frame, size - 4));
+    const uint32_t value = canfd_xor(frame, size - 4);
+    frame[size - 4] = static_cast<uint8_t>(value);
+    frame[size - 3] = static_cast<uint8_t>(value >> 8);
+    frame[size - 2] = static_cast<uint8_t>(value >> 16);
+    frame[size - 1] = static_cast<uint8_t>(value >> 24);
 }
 
 bool init_packet_ok(const uint8_t* frame, uint32_t length)
@@ -136,15 +161,22 @@ bool data_frame_ok(const uint8_t* frame, uint8_t expect_type)
         return false;
     }
     if (le32(frame) != CANFD_INNER_HEAD) {
+        std::printf("[CANFD DATA] reject head wire=%02X %02X %02X %02X value=0x%08X\n", frame[0], frame[1], frame[2], frame[3], le32(frame));
         return false;
     }
     if (frame[4] != 0 || frame[5] != expect_type || frame[6] != CANFD_FRAME_SIZE) {
+        std::printf("[CANFD DATA] reject fields dir=%u type=0x%02X len=%u expect=0x%02X/%u\n", frame[4], frame[5], frame[6], expect_type, CANFD_FRAME_SIZE);
         return false;
     }
     if (frame[7] >= CANFD_CHANNEL_COUNT) {
+        std::printf("[CANFD DATA] reject channel=%u\n", frame[7]);
         return false;
     }
-    return checksum_ok(frame, CANFD_FRAME_SIZE);
+    if (!checksum_ok(frame, CANFD_FRAME_SIZE)) {
+        std::printf("[CANFD DATA] reject checksum wire=%02X %02X %02X %02X\n", frame[108], frame[109], frame[110], frame[111]);
+        return false;
+    }
+    return true;
 }
 
 bool simulator_ok(const uint8_t* packet, uint32_t length)
@@ -233,7 +265,7 @@ uint32_t canfd_xor(const uint8_t* data, size_t size_without_checksum)
 {
     uint32_t value = 0;
     for (size_t i = 0; i + 4 <= size_without_checksum; i += 4) {
-        value ^= canfd_get_be32(data + i);
+        value ^= le32(data + i);
     }
     return value;
 }
@@ -281,12 +313,12 @@ CommandResponse canfd_cmd_config(const NetHeader& header, const uint8_t* payload
     std::lock_guard<std::mutex> lock(g_state_mu);
     if (!init_packet_ok(payload, length)) {
         print_config_frame(payload, length, "REJECT");
-        return canfd_cmd_status(header, 1);
+        return canfd_cmd_status(header, 0xBB);
     }
     const uint8_t channel = payload[7];
     if (canfd_hw_apply_config(channel, payload, CANFD_FRAME_SIZE) != 0) {
         std::printf("[CANFD CMD] config failed ch=%u\n", channel);
-        return canfd_cmd_status(header, 1);
+        return canfd_cmd_status(header, 0xBB);
     }
     std::memcpy(g_channels[channel].packet, payload, CANFD_FRAME_SIZE);
     g_channels[channel].configured = true;
@@ -294,7 +326,7 @@ CommandResponse canfd_cmd_config(const NetHeader& header, const uint8_t* payload
     std::printf("[CANFD CMD] config ok ch=%u baud=%u dbitrate=%u mode=0x%02X brs=%u\n",
                 channel, le32(payload + 16), le32(payload + 28),
                 payload[20], payload[32]);
-    return canfd_cmd_status(header, 0);
+    return canfd_cmd_status(header, 0xAA);
 }
 
 CommandResponse canfd_cmd_info_query(const NetHeader& header, const uint8_t* payload, uint32_t length)
@@ -323,7 +355,7 @@ CommandResponse canfd_cmd_start_stop(const NetHeader& header, const uint8_t* pay
         std::printf("[CANFD CMD] run reject len=%u\n", length);
         return canfd_cmd_status(header, 1);
     }
-    const uint32_t channel = canfd_get_be32(payload);
+    const uint32_t channel = start_stop_channel(payload);
     const uint32_t state = canfd_get_be32(payload + 4);
     if (channel >= CANFD_CHANNEL_COUNT || (state != 0xAA && state != 0xBB)) {
         std::printf("[CANFD CMD] run reject ch=%u state=0x%08X\n", channel, state);
@@ -355,9 +387,12 @@ CommandResponse canfd_cmd_buf_query(const NetHeader& header, const uint8_t* payl
     std::vector<uint8_t> body(CANFD_CHANNEL_COUNT * 16, 0);
     for (uint8_t ch = 0; ch < CANFD_CHANNEL_COUNT; ++ch) {
         body[ch * 16] = ch;
-        canfd_put_be32(body.data() + ch * 16 + 4, capacity[ch].can_space);
-        canfd_put_be32(body.data() + ch * 16 + 8, capacity[ch].pulse_space);
-        canfd_put_be32(body.data() + ch * 16 + 12, capacity[ch].simulation_space);
+        uint8_t* p = body.data() + ch * 16 + 4;
+        p[0]=static_cast<uint8_t>(capacity[ch].can_space); p[1]=static_cast<uint8_t>(capacity[ch].can_space>>8); p[2]=static_cast<uint8_t>(capacity[ch].can_space>>16); p[3]=static_cast<uint8_t>(capacity[ch].can_space>>24);
+        p = body.data() + ch * 16 + 8;
+        p[0]=static_cast<uint8_t>(capacity[ch].pulse_space); p[1]=static_cast<uint8_t>(capacity[ch].pulse_space>>8); p[2]=static_cast<uint8_t>(capacity[ch].pulse_space>>16); p[3]=static_cast<uint8_t>(capacity[ch].pulse_space>>24);
+        p = body.data() + ch * 16 + 12;
+        p[0]=static_cast<uint8_t>(capacity[ch].simulation_space); p[1]=static_cast<uint8_t>(capacity[ch].simulation_space>>8); p[2]=static_cast<uint8_t>(capacity[ch].simulation_space>>16); p[3]=static_cast<uint8_t>(capacity[ch].simulation_space>>24);
     }
     return respond_with(header, body);
 }
@@ -369,7 +404,7 @@ CommandResponse canfd_cmd_version(const NetHeader& header, const uint8_t* payloa
         version = CANFD_APP_VERSION;
     }
     uint8_t bytes[4];
-    canfd_put_be32(bytes, version);
+    bytes[0]=static_cast<uint8_t>(version); bytes[1]=static_cast<uint8_t>(version>>8); bytes[2]=static_cast<uint8_t>(version>>16); bytes[3]=static_cast<uint8_t>(version>>24);
     return respond_with(header, std::vector<uint8_t>(bytes, bytes + 4));
 }
 

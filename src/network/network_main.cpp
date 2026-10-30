@@ -9,6 +9,20 @@
 
 namespace {
 
+static void put_le16(uint8_t* p, uint16_t v)
+{
+    p[0] = static_cast<uint8_t>(v);
+    p[1] = static_cast<uint8_t>(v >> 8);
+}
+
+static void put_le32(uint8_t* p, uint32_t v)
+{
+    p[0] = static_cast<uint8_t>(v);
+    p[1] = static_cast<uint8_t>(v >> 8);
+    p[2] = static_cast<uint8_t>(v >> 16);
+    p[3] = static_cast<uint8_t>(v >> 24);
+}
+
 NetHeader HeaderFromRequest(const Request* request)
 {
     NetHeader header;
@@ -134,6 +148,23 @@ int NetServer::SendCommandResponse(const CommandResponse& response)
     // 9009 only receives. The reply leaves on 9010 and is dropped if nobody is connected.
     int ret = canfd_send_response(response.index, response.count, response.time,
                                   body, static_cast<uint32_t>(response.payload.size()));
+    unsigned status = 0xFFFFFFFFu;
+    if (response.payload.size() == 4 && body != nullptr) {
+        const uint8_t* p = static_cast<const uint8_t*>(body);
+        status = static_cast<unsigned>(p[0]) |
+                 (static_cast<unsigned>(p[1]) << 8) |
+                 (static_cast<unsigned>(p[2]) << 16) |
+                 (static_cast<unsigned>(p[3]) << 24);
+    }
+    const char* status_text = "n/a";
+    if (status != 0xFFFFFFFFu) {
+        status_text = (status == 0 || status == 0xAA) ? "OK" :
+                      ((status == 1 || status == 0xBB) ? "FAIL" : "UNKNOWN");
+    }
+    printf("[CANFD RESP] port=%d index=0x%04X count=%u len=%u status=%s(0x%08X) rc=%d\n",
+           port_, response.index, response.count,
+           static_cast<unsigned>(response.payload.size()),
+           status_text, status, ret);
     if (ret != 0 && port_ == CMD_PORT) {
         printf("[CANFD] port %d response dropped, 9010 has no client\n", port_);
     }
@@ -142,18 +173,32 @@ int NetServer::SendCommandResponse(const CommandResponse& response)
 
 int NetServer::SendCapacityReport()
 {
-    Cache_report_inf_t capacity[CANFD_CHANNEL_COUNT] = {};
-    if (axififo_query_capacity(capacity) != 0) return -1;
-    std::vector<uint8_t> payload(sizeof(capacity), 0);
-    for (unsigned i = 0; i < CANFD_CHANNEL_COUNT; ++i) {
+    /* Keep the legacy ground-station format: report 32 slots, while only
+     * channels 0..5 are backed by hardware.  Unsupported slots are 0xFFFFFFFF. */
+    const unsigned report_channels = 32;
+    Cache_report_inf_t capacity[report_channels] = {};
+    Cache_report_inf_t hw_capacity[CANFD_CHANNEL_COUNT] = {};
+    if (axififo_query_capacity(hw_capacity) != 0) return -1;
+    for (unsigned i = 0; i < report_channels; ++i) {
+        capacity[i].chn_id = static_cast<unsigned char>(i);
+        capacity[i].can_space = 0xFFFFFFFFu;
+        capacity[i].pulse_space = 0xFFFFFFFFu;
+        capacity[i].simulation_space = 0xFFFFFFFFu;
+        capacity[i].dmaddr_space = 0xFFFFFFFFu;
+        capacity[i].vfifo_space = 0xFFFFFFFFu;
+        capacity[i].axififo_space = 0xFFFFFFFFu;
+    }
+    for (unsigned i = 0; i < CANFD_CHANNEL_COUNT; ++i) capacity[i] = hw_capacity[i];
+    std::vector<uint8_t> payload(report_channels * sizeof(Cache_report_inf_t), 0);
+    for (unsigned i = 0; i < report_channels; ++i) {
         uint8_t* p = payload.data() + i * sizeof(Cache_report_inf_t);
         p[0] = capacity[i].chn_id;
-        canfd_put_be32(p + 1, capacity[i].can_space);
-        canfd_put_be32(p + 5, capacity[i].pulse_space);
-        canfd_put_be32(p + 9, capacity[i].simulation_space);
-        canfd_put_be32(p + 13, capacity[i].dmaddr_space);
-        canfd_put_be32(p + 17, capacity[i].vfifo_space);
-        canfd_put_be32(p + 21, capacity[i].axififo_space);
+        put_le32(p + 1, capacity[i].can_space);
+        put_le32(p + 5, capacity[i].pulse_space);
+        put_le32(p + 9, capacity[i].simulation_space);
+        put_le32(p + 13, capacity[i].dmaddr_space);
+        put_le32(p + 17, capacity[i].vfifo_space);
+        put_le32(p + 21, capacity[i].axififo_space);
     }
     NetHeader h = {};
     h.cmd_code = NET_RES_CODE;
@@ -165,17 +210,19 @@ int NetServer::SendCapacityReport()
     net_header_encode(raw, h);
     std::lock_guard<std::mutex> lock(io_mutex_);
     if (client_ == nullptr || !client_->IsConnected()) return -1;
-    return client_->SendFully(raw, sizeof(raw)) &&
-           client_->SendFully(payload.data(), static_cast<int>(payload.size())) ? 0 : -1;
+    const bool ok = client_->SendFully(raw, sizeof(raw)) &&
+                    client_->SendFully(payload.data(), static_cast<int>(payload.size()));
+    return ok ? 0 : -1;
 }
 
 void NetServer::CapacityReportLoop()
 {
+    std::this_thread::sleep_for(std::chrono::seconds(5));
     while (!report_stop_) {
         if (port_ == DATA_DOWN_PORT && client_ != nullptr) {
             (void)SendCapacityReport();
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        std::this_thread::sleep_for(std::chrono::microseconds(500));
     }
 }
 
@@ -327,12 +374,32 @@ void NetServer::ReceiveLoop(Thread* thread, uint32_t expect_code, uint32_t max_p
             continue;
         }
 
-        char recv_buf[16] = {0};
-        int ret = client_->RecvFully(recv_buf, 16);
+        /* The 9012 data packet header is:
+         * sync/length/count/type/checksum (16 bytes) + channel (4 bytes).
+         * Its length field describes only the following payload. */
+        const int wire_header_size = command ? MESSAGE_HEAD_SIZE : DATA_HEADER_SIZE;
+        char recv_buf[DATA_HEADER_SIZE] = {0};
+        int ret = client_->RecvFully(recv_buf, wire_header_size);
         if (ret <= 0) {
             printf("[CANFD] client left port %d\n", port_);
             DropClient();
             continue;
+        }
+
+        /* Validate the data header while it is still in network byte order.
+         * The two fields below are normalized in place afterwards. */
+        const uint8_t* wire_header = reinterpret_cast<const uint8_t*>(recv_buf);
+        uint32_t packet_channel = 0;
+        bool data_header_ok = true;
+        uint32_t wire_checksum = 0;
+        uint32_t calculated_checksum = 0;
+        if (!command) {
+            wire_checksum = canfd_get_be32(wire_header + 12);
+            calculated_checksum = canfd_get_be32(wire_header) ^
+                                  canfd_get_be32(wire_header + 4) ^
+                                  canfd_get_be32(wire_header + 8);
+            data_header_ok = wire_checksum == calculated_checksum;
+            packet_channel = canfd_get_be32(wire_header + MESSAGE_HEAD_SIZE);
         }
 
         Request* req_head = reinterpret_cast<Request*>(recv_buf);
@@ -359,6 +426,17 @@ void NetServer::ReceiveLoop(Thread* thread, uint32_t expect_code, uint32_t max_p
         if (command) {
             ProcMessage(reinterpret_cast<char*>(msg.data()));
         } else {
+            if (!data_header_ok) {
+                printf("[CANFD 9012] reject header checksum wire=0x%08X calculated=0x%08X\n",
+                       wire_checksum, calculated_checksum);
+                continue;
+            }
+            if (packet_channel >= CANFD_CHANNEL_COUNT) {
+                printf("[CANFD 9012] reject index=0x%04X channel=%u length=%u\n",
+                       ntohs(req_head->index), packet_channel,
+                       static_cast<unsigned>(req_head->length));
+                continue;
+            }
             DataProcMessage(reinterpret_cast<char*>(msg.data()));
         }
     }

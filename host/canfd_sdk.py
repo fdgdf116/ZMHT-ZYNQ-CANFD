@@ -10,6 +10,7 @@ ZYNQ CANFD 上位机 SDK / 命令行工具
   - 9012 下发数据，外层 cmd_code = 0x04CCF0FF
   - 9010 上/下行，命令应答 0x05CCF0FF，数据上行 0x01CCF0FF
   - 外层 16 字节头，内层 112 字节包，全部大端
+  - 9012 在外层头后额外带 4 字节通道号 uint32，不计入外层 length
   - 内层同步头 0x499602D2，校验为 Byte1~108 按 4 字节字异或
 
 常用：
@@ -105,6 +106,12 @@ def pack_net_header(code: int, length: int, count: int = 0,
                     index: int = 0, timestamp: int = 0, crc: int = 0) -> bytes:
     return struct.pack(">IIHHHH", code, length, count & 0xFFFF,
                        index & 0xFFFF, timestamp & 0xFFFF, crc & 0xFFFF)
+
+
+def pack_data_header(index: int, length: int, channel: int) -> bytes:
+    header = bytearray(pack_net_header(DATA_CODE, length, 0, index))
+    struct.pack_into(">I", header, 12, xor32(bytes(header[:12])))
+    return bytes(header) + struct.pack(">I", channel)
 
 
 def unpack_net_header(data: bytes) -> Tuple[int, int, int, int, int, int]:
@@ -486,6 +493,10 @@ class CanFdClient:
                 if code == UP_CODE:
                     if length == 0:
                         continue
+                    wire_channel = None
+                    if index in (UPLINK_INDEX_STATUS, UPLINK_INDEX_RX):
+                        wire_channel = struct.unpack(
+                            ">I", self._recv_exact(sock, 4))[0]
                     payload = self._recv_exact(sock, length)
                     if index not in (UPLINK_INDEX_STATUS, UPLINK_INDEX_RX,
                                      UPLINK_INDEX_SIM):
@@ -493,6 +504,8 @@ class CanFdClient:
                     try:
                         frame = CanFdFrame.from_inner(payload, index)
                     except ProtocolError:
+                        continue
+                    if wire_channel is not None and frame.channel != wire_channel:
                         continue
                     if index == UPLINK_INDEX_STATUS:
                         with self._tx_lock:
@@ -619,7 +632,7 @@ class CanFdClient:
             self._tx_pending[key] = (event, box)
         try:
             self._data_sock.sendall(
-                pack_net_header(DATA_CODE, len(packet), 0, index) + packet)
+                pack_data_header(index, len(packet), channel) + packet)
             if not event.wait(self.timeout if timeout is None else timeout):
                 raise CanFdTimeout(
                     "未收到 0x%02X 通道 %d 的发送反馈：确认通道已 start、"
@@ -683,6 +696,9 @@ def cmd_selftest(_args) -> int:
     check("header bytes", raw == bytes.fromhex("03CCF0FF0000007012340101ABCD0000"))
     check("header roundtrip", unpack_net_header(raw)[:5] ==
           (CMD_CODE, 112, 0x1234, CMD_CAN_CONFIG, 0xABCD))
+    data_header = pack_data_header(DATA_INDEX_NORMAL, 112, 0)
+    check("data header", data_header == bytes.fromhex(
+        "04CCF0FF000000700000000104CCF08E00000000"))
 
     # IDR
     check("idr std", idr_encode(0x123) == (0x123 << 21))

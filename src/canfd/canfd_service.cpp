@@ -33,6 +33,14 @@ uint64_t now_us()
            static_cast<uint64_t>(ts.tv_nsec) / 1000ULL;
 }
 
+static void put_le32(uint8_t* p, uint32_t v)
+{
+    p[0] = static_cast<uint8_t>(v & 0xFFU);
+    p[1] = static_cast<uint8_t>((v >> 8) & 0xFFU);
+    p[2] = static_cast<uint8_t>((v >> 16) & 0xFFU);
+    p[3] = static_cast<uint8_t>((v >> 24) & 0xFFU);
+}
+
 void write_be64(uint8_t* dest, uint64_t value)
 {
     for (int i = 0; i < 8; ++i) {
@@ -172,13 +180,13 @@ extern "C" int canfd_service_send(uint8_t channel,
 
     uint8_t packet[CANFD_FRAME_SIZE];
     std::memset(packet, 0, sizeof(packet));
-    canfd_put_be32(packet, CANFD_INNER_HEAD);
+    put_le32(packet, CANFD_INNER_HEAD);
     packet[4] = 0;                 /* host -> device path */
     packet[5] = 0x01;              /* normal send */
     packet[6] = CANFD_FRAME_SIZE;
     packet[7] = channel;
-    canfd_put_be32(packet + 8, total_count);
-    canfd_put_be32(packet + 12, ch_count);
+    put_le32(packet + 8, total_count);
+    put_le32(packet + 12, ch_count);
 
     canfd_message_t msg;
     std::memset(&msg, 0, sizeof(msg));

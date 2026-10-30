@@ -23,7 +23,7 @@ private:
     SyncSend(const char* ip, int port);
     virtual ~SyncSend();
     int SendLocked(uint32_t code, uint16_t index, uint16_t count, uint16_t time,
-                   const void* payload, uint32_t len);
+                   const void* payload, uint32_t len, int channel);
     void DaemodLoop(Thread* thread);
 
     Thread daemond_thread_;

@@ -11,6 +11,8 @@ const int RES_CODE = 0x05CCF0FF;
 const int DATA_CODE = 0x04CCF0FF;
 
 const int MESSAGE_HEAD_SIZE = 16;
+const int DATA_CHANNEL_SIZE = 4; // 9012 数据包头末尾的通道号 uint32
+const int DATA_HEADER_SIZE = MESSAGE_HEAD_SIZE + DATA_CHANNEL_SIZE;
 typedef struct Request_ {
 	int cmd_code;         // 命令同步字
 	int length;           // 命令数据长度

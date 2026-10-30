@@ -44,6 +44,7 @@ constexpr uint32_t kResCode = 0x05CCF0FFu;
 constexpr uint32_t kUpCode = 0x01CCF0FFu;
 constexpr size_t kFrameSize = 112;
 constexpr size_t kNetHeadSize = 16;
+constexpr size_t kDataChannelSize = 4;
 constexpr int kReadyDelayMs = 1200;
 
 const uint8_t kFdLen[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 20, 24, 32, 48, 64};
@@ -479,6 +480,19 @@ bool SendPacket(socket_t s, uint32_t code, uint16_t count, uint16_t index,
     return payload.empty() || SendAll(s, payload.data(), payload.size());
 }
 
+bool SendDataPacket(socket_t s, uint16_t index, uint8_t channel,
+                    const std::vector<uint8_t>& payload)
+{
+    std::vector<uint8_t> header = PackNetHeader(
+        kDataCode, static_cast<uint32_t>(payload.size()), 0, index);
+    PutBe32(header.data() + 12, Xor32(header.data(), 12));
+    uint8_t channel_bytes[kDataChannelSize];
+    PutBe32(channel_bytes, channel);
+    return SendAll(s, header.data(), header.size()) &&
+           SendAll(s, channel_bytes, sizeof(channel_bytes)) &&
+           (payload.empty() || SendAll(s, payload.data(), payload.size()));
+}
+
 uint32_t Key16(uint16_t index, uint16_t count)
 {
     return (static_cast<uint32_t>(index) << 16) | count;
@@ -546,6 +560,14 @@ void Client::Impl::ReaderLoop()
         if (length > 16 * 1024 * 1024) {
             break;
         }
+        uint32_t wire_channel = 0xFFFFFFFFu;
+        if (code == kUpCode && (index == kUplinkStatus || index == kUplinkRx)) {
+            uint8_t channel_bytes[kDataChannelSize];
+            if (!RecvExact(up, channel_bytes, sizeof(channel_bytes))) {
+                break;
+            }
+            wire_channel = GetBe32(channel_bytes);
+        }
         std::vector<uint8_t> payload(length);
         if (length != 0 && !RecvExact(up, payload.data(), payload.size())) {
             break;
@@ -565,6 +587,9 @@ void Client::Impl::ReaderLoop()
         }
         Frame frame;
         if (!ParseInner(payload, &frame)) {
+            continue;
+        }
+        if (wire_channel != 0xFFFFFFFFu && frame.channel != wire_channel) {
             continue;
         }
         if (index == kUplinkStatus) {
@@ -911,7 +936,7 @@ bool Client::Send(const Frame& frame, Frame* feedback, int timeout_ms,
         std::lock_guard<std::mutex> lock(impl_->wait_mu);
         impl_->tx_wait[key] = Impl::TxWait();
     }
-    const bool sent = SendPacket(impl_->data, kDataCode, 0, index, packet);
+    const bool sent = SendDataPacket(impl_->data, index, frame.channel, packet);
     if (!sent) {
         std::lock_guard<std::mutex> lock(impl_->wait_mu);
         impl_->tx_wait.erase(key);

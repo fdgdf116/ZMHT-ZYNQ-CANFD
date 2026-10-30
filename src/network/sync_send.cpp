@@ -5,6 +5,9 @@
 
 namespace network {
 
+static void put_le16(uint8_t* p, uint16_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); }
+static void put_le32(uint8_t* p, uint32_t v) { p[0]=(uint8_t)v; p[1]=(uint8_t)(v>>8); p[2]=(uint8_t)(v>>16); p[3]=(uint8_t)(v>>24); }
+
 SyncSend* SyncSend::instance_ = nullptr;
 
 SyncSend* SyncSend::GetInstance()
@@ -75,7 +78,7 @@ bool SyncSend::IsActive()
 }
 
 int SyncSend::SendLocked(uint32_t code, uint16_t index, uint16_t count, uint16_t time,
-                         const void* payload, uint32_t len)
+                         const void* payload, uint32_t len, int channel)
 {
     if (len > 0 && payload == nullptr) {
         return FAIL;
@@ -92,6 +95,12 @@ int SyncSend::SendLocked(uint32_t code, uint16_t index, uint16_t count, uint16_t
     net.time = time;
     net.crc = 0;
     net_header_encode(header, net);
+    if (channel >= 0) {
+        canfd_put_be32(header + 12,
+                       canfd_get_be32(header) ^
+                       canfd_get_be32(header + 4) ^
+                       canfd_get_be32(header + 8));
+    }
 
     if (exc_client_ == nullptr || !exc_client_->IsConnected()) {
         return FAIL;
@@ -100,6 +109,15 @@ int SyncSend::SendLocked(uint32_t code, uint16_t index, uint16_t count, uint16_t
         delete exc_client_;
         exc_client_ = nullptr;
         return FAIL;
+    }
+    if (channel >= 0) {
+        uint8_t channel_bytes[4];
+        canfd_put_be32(channel_bytes, static_cast<uint32_t>(channel));
+        if (!exc_client_->SendFully(channel_bytes, sizeof(channel_bytes))) {
+            delete exc_client_;
+            exc_client_ = nullptr;
+            return FAIL;
+        }
     }
     if (len > 0 && !exc_client_->SendFully(payload, static_cast<int>(len))) {
         delete exc_client_;
@@ -113,7 +131,7 @@ int SyncSend::SendResponse(uint16_t index, uint16_t count, uint16_t time,
                            const void* payload, uint32_t len)
 {
     MutexScopedLocker locker(send_mutex_);
-    return SendLocked(NET_RES_CODE, index, count, time, payload, len);
+    return SendLocked(NET_RES_CODE, index, count, time, payload, len, -1);
 }
 
 int SyncSend::SendUplink(uint16_t index, const void* payload, uint32_t len)
@@ -124,9 +142,17 @@ int SyncSend::SendUplink(uint16_t index, const void* payload, uint32_t len)
     if (index != UPLINK_INDEX_STATUS && index != UPLINK_INDEX_RX && index != UPLINK_INDEX_SIM) {
         return FAIL;
     }
+    int channel = -1;
+    if (index == UPLINK_INDEX_STATUS || index == UPLINK_INDEX_RX) {
+        const uint8_t* frame = static_cast<const uint8_t*>(payload);
+        if (frame[7] >= CANFD_CHANNEL_COUNT) {
+            return FAIL;
+        }
+        channel = frame[7];
+    }
     MutexScopedLocker locker(send_mutex_);
     const uint16_t count = static_cast<uint16_t>(uplink_count_ + 1);
-    const int ret = SendLocked(NET_UP_CODE, index, count, 0, payload, len);
+    const int ret = SendLocked(NET_UP_CODE, index, count, 0, payload, len, channel);
     if (ret == OK) {
         uplink_count_ = count;
     }

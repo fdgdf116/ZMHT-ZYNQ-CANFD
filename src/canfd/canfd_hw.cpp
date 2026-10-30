@@ -29,6 +29,14 @@ static uint32_t le32_read(const uint8_t* p)
            (static_cast<uint32_t>(p[3]) << 24);
 }
 
+static void le32_write(uint8_t* p, uint32_t v)
+{
+    p[0] = static_cast<uint8_t>(v & 0xFFU);
+    p[1] = static_cast<uint8_t>((v >> 8) & 0xFFU);
+    p[2] = static_cast<uint8_t>((v >> 16) & 0xFFU);
+    p[3] = static_cast<uint8_t>((v >> 24) & 0xFFU);
+}
+
 const int kChannelCount = CANFD_CHANNEL_COUNT;
 
 struct ChannelHw {
@@ -76,6 +84,28 @@ void write_be64(uint8_t* dest, uint64_t value)
     }
 }
 
+void reverse_data_words(uint8_t* data, size_t len)
+{
+    for (size_t i = 0; i + 4 <= len; i += 4) {
+        const uint8_t b0 = data[i];
+        const uint8_t b1 = data[i + 1];
+        data[i] = data[i + 3];
+        data[i + 1] = data[i + 2];
+        data[i + 2] = b1;
+        data[i + 3] = b0;
+    }
+}
+
+void dump_hex(const char* tag, const uint8_t* data, size_t len)
+{
+    printf("%s (%u bytes):", tag, static_cast<unsigned>(len));
+    for (size_t i = 0; i < len; ++i) {
+        if ((i % 16) == 0) printf("\n  ");
+        printf("%02X ", data[i]);
+    }
+    printf("\n");
+}
+
 const char* iface_name(uint8_t channel, char* buf, size_t size)
 {
     snprintf(buf, size, "can%u", static_cast<unsigned>(channel));
@@ -113,14 +143,23 @@ int configure_interface(uint8_t channel, const ChannelHw& cfg)
         printf("[CANFD] %s down failed\n", iface);
     }
 
-    /* The board-verified sample points are tried first; the driver computes
-     * its own timing when a sample point is rejected. */
+    /* Match the ground-station timing first (80% on both segments), then
+     * fall back to the previously board-tested points and finally let the
+     * driver calculate its own timing. */
     snprintf(cmd, sizeof(cmd),
-             "ip link set %s type can bitrate %u sample-point 0.875 "
-             "dbitrate %u dsample-point 0.750 fd on%s",
+             "ip link set %s type can bitrate %u sample-point 0.800 "
+             "dbitrate %u dsample-point 0.800 fd on%s",
              iface, cfg.baud, dbitrate, loopback);
     printf("[CANFD] configure: %s\n", cmd);
     int rc = system(cmd);
+    if (rc != 0) {
+        snprintf(cmd, sizeof(cmd),
+                 "ip link set %s type can bitrate %u sample-point 0.875 "
+                 "dbitrate %u dsample-point 0.750 fd on%s",
+                 iface, cfg.baud, dbitrate, loopback);
+        printf("[CANFD] configure fallback: %s\n", cmd);
+        rc = system(cmd);
+    }
     if (rc != 0) {
         snprintf(cmd, sizeof(cmd),
                  "ip link set %s type can bitrate %u dbitrate %u fd on%s",
@@ -148,18 +187,25 @@ int configure_interface(uint8_t channel, const ChannelHw& cfg)
 void fill_rx_packet(uint8_t channel, const canfd_message_t& msg, uint8_t packet[112])
 {
     memset(packet, 0, CANFD_FRAME_SIZE);
-    canfd_put_be32(packet, CANFD_INNER_HEAD);
+    /* Inner protocol words are little-endian on the wire: 0x499602D2
+     * appears as D2 02 96 49 in the capture. */
+    le32_write(packet, CANFD_INNER_HEAD);
     packet[4] = 1;                                  /* device -> host */
     packet[5] = static_cast<uint8_t>(UPLINK_INDEX_RX);
     packet[6] = CANFD_FRAME_SIZE;
     packet[7] = channel;
-    canfd_put_be32(packet + 8, next_total_count());
-    canfd_put_be32(packet + 12, ++g_ch[channel].ch_count);
-    canfd_packet_encode_message(packet, &msg);
+    le32_write(packet + 8, next_total_count());
+    le32_write(packet + 12, ++g_ch[channel].ch_count);
+    /* CAN bus data words are stored in the opposite order from the upper
+     * computer's little-endian words.  Convert only the payload data; the
+     * inner header, IDR, DRCR and counters keep their wire format. */
+    canfd_message_t upper_msg = msg;
+    reverse_data_words(upper_msg.data, upper_msg.len);
+    canfd_packet_encode_message(packet, &upper_msg);
     packet[96] = 0;                                 /* States: 0 = receive ok */
     packet[97] = 0;
     write_be64(packet + 100, now_us());
-    canfd_put_be32(packet + 108, canfd_xor(packet, 108));
+    le32_write(packet + 108, canfd_xor(packet, 108));
 }
 
 void* rx_thread_main(void* arg)
@@ -235,8 +281,13 @@ void* rx_thread_main(void* arg)
         printf("[CANFD RX] ch=%u id=0x%X len=%u %s%s\n",
                channel, msg.can_id, msg.len, msg.fd ? "FD " : "CAN ",
                msg.brs ? "BRS" : "");
+        dump_hex("[CANFD RX DATA]", msg.data, msg.len);
         uint8_t packet[CANFD_FRAME_SIZE];
         fill_rx_packet(channel, msg, packet);
+        /* The encoded 112-byte uplink packet is protocol transport data and
+         * is intentionally not dumped here.  Keep the decoded CAN frame log
+         * above so received payloads remain visible without flooding the
+         * console with duplicate packet bytes. */
         (void)canfd_send_uplink(UPLINK_INDEX_RX, packet, CANFD_FRAME_SIZE);
     }
     return nullptr;
@@ -402,7 +453,7 @@ extern "C" int canfd_hw_submit_frame(uint8_t channel, uint8_t type, const uint8_
     if (channel >= kChannelCount || frame == nullptr || length != CANFD_FRAME_SIZE) {
         return -1;
     }
-    if (canfd_get_be32(frame) != CANFD_INNER_HEAD) {
+    if (le32_read(frame) != CANFD_INNER_HEAD) {
         return -1;
     }
     ChannelHw* ch = &g_ch[channel];
@@ -437,6 +488,9 @@ extern "C" int canfd_hw_submit_frame(uint8_t channel, uint8_t type, const uint8_
         }
     }
 
+    /* The upper-computer data words use the opposite byte order from the
+     * CAN FD controller's data words.  Protocol header fields stay unchanged. */
+    reverse_data_words(msg.data, msg.len);
     int written = -1;
     if (msg.fd) {
         struct canfd_frame can;
