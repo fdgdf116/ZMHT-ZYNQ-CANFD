@@ -30,6 +30,7 @@ int canfd_hw_apply_config(uint8_t channel, const uint8_t* init_frame, uint32_t l
 int canfd_hw_set_run(uint8_t channel, uint32_t state);
 int canfd_hw_submit_frame(uint8_t channel, uint8_t type, const uint8_t* frame, uint32_t length);
 int canfd_hw_submit_simulator(uint8_t channel, const uint8_t* packet, uint32_t length);
+int canfd_hw_channel_is_open(uint8_t channel);
 void canfd_hw_set_rx_callback(canfd_hw_rx_cb cb, void* user);
 
 /* Non-zero when no real CAN interface is available for any channel. */

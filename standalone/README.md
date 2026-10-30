@@ -104,10 +104,16 @@ chmod +x /home/root/canfd_server
 5. 9010 收 0x0080，报文为 16 字节网络头 + 4 字节通道号 + 112 字节 CAN FD 状态帧；
    `States=1` 表示本次发送成功。0x0081 接收上报使用同样的外层封装。
 
+普通/秒脉冲发送先进入每通道对应的预分配环形缓冲区，缓冲区剩余空间每 50 ms
+通过 9012 容量上报返回，由上位机控制写入速率。对应通道开启后，发送线程才会
+取帧并按 CAN 总线速率发送。缓冲区满时新帧立即被拒绝；发送线程遇到 `ENOBUFS`
+时丢弃当前帧，并通过 0x0080 上报 `States=0`。
+
 程序内部调用链：
 
 ```text
 9012 -> network_main.cpp -> protocol.cpp canfd_data_normal
+     -> can_tx_queue.cpp per-channel queue/worker
      -> canfd_hw.cpp canfd_hw_submit_frame
      -> PF_CAN raw socket -> xilinx_can -> CANFD IP -> 总线
 ```

@@ -8,11 +8,11 @@
  *   - Start() brings up the TCP protocol service (9009/9010/9012) and
  *     the SocketCAN hardware layer.
  *   - Send() packs one CAN/CAN FD frame into the 112-byte protocol packet
- *     and hands it to the kernel xilinx_can driver.
+ *     and queues it for the per-channel sender thread.
  *   - SetRxCallback() receives frames from the CAN bus in the RX thread.
  *
  * The TCP path itself is unchanged:
- *   9012 -> protocol.cpp -> canfd_hw_submit_frame()
+ *   9012 -> protocol.cpp -> per-channel TX queue -> canfd_hw_submit_frame()
  *   rx thread -> 0x81 packet -> 9010
  */
 
@@ -47,9 +47,9 @@ void canfd_service_stop(void);
 int canfd_service_is_running(void);
 
 /*
- * Direct board-side send. Returns 0 on success, -1 on failure.
- * tx_state, if non-NULL, receives 1 for success / 0 for failure (the same
- * value used by the 0x80 feedback packet).
+ * Direct board-side send. Returns 0 when queued, -1 when the queue rejects it.
+ * tx_state, if non-NULL, receives 1 for queued / 0 for rejected. The actual
+ * transmit result is reported later by the 0x80 feedback packet.
  */
 int canfd_service_send(uint8_t channel,
                        uint32_t can_id,

@@ -195,10 +195,24 @@ CMakeFiles/canfd_server.dir/src/canfd/canfd_service.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/canfd_server.dir/src/canfd/canfd_service.cpp.s"
 	/home/wang/ZMHT-Tool/gcc-arm-linux-gnueabi/bin/arm-linux-gnueabihf-g++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/wang/ZMHT-Project/ZMHT-ZYNQ-CANFD/src/canfd/canfd_service.cpp -o CMakeFiles/canfd_server.dir/src/canfd/canfd_service.cpp.s
 
+CMakeFiles/canfd_server.dir/src/canfd/can_tx_queue.cpp.o: CMakeFiles/canfd_server.dir/flags.make
+CMakeFiles/canfd_server.dir/src/canfd/can_tx_queue.cpp.o: ../src/canfd/can_tx_queue.cpp
+CMakeFiles/canfd_server.dir/src/canfd/can_tx_queue.cpp.o: CMakeFiles/canfd_server.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/home/wang/ZMHT-Project/ZMHT-ZYNQ-CANFD/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_10) "Building CXX object CMakeFiles/canfd_server.dir/src/canfd/can_tx_queue.cpp.o"
+	/home/wang/ZMHT-Tool/gcc-arm-linux-gnueabi/bin/arm-linux-gnueabihf-g++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/canfd_server.dir/src/canfd/can_tx_queue.cpp.o -MF CMakeFiles/canfd_server.dir/src/canfd/can_tx_queue.cpp.o.d -o CMakeFiles/canfd_server.dir/src/canfd/can_tx_queue.cpp.o -c /home/wang/ZMHT-Project/ZMHT-ZYNQ-CANFD/src/canfd/can_tx_queue.cpp
+
+CMakeFiles/canfd_server.dir/src/canfd/can_tx_queue.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/canfd_server.dir/src/canfd/can_tx_queue.cpp.i"
+	/home/wang/ZMHT-Tool/gcc-arm-linux-gnueabi/bin/arm-linux-gnueabihf-g++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/wang/ZMHT-Project/ZMHT-ZYNQ-CANFD/src/canfd/can_tx_queue.cpp > CMakeFiles/canfd_server.dir/src/canfd/can_tx_queue.cpp.i
+
+CMakeFiles/canfd_server.dir/src/canfd/can_tx_queue.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/canfd_server.dir/src/canfd/can_tx_queue.cpp.s"
+	/home/wang/ZMHT-Tool/gcc-arm-linux-gnueabi/bin/arm-linux-gnueabihf-g++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/wang/ZMHT-Project/ZMHT-ZYNQ-CANFD/src/canfd/can_tx_queue.cpp -o CMakeFiles/canfd_server.dir/src/canfd/can_tx_queue.cpp.s
+
 CMakeFiles/canfd_server.dir/src/hardware/fifo_engine.cpp.o: CMakeFiles/canfd_server.dir/flags.make
 CMakeFiles/canfd_server.dir/src/hardware/fifo_engine.cpp.o: ../src/hardware/fifo_engine.cpp
 CMakeFiles/canfd_server.dir/src/hardware/fifo_engine.cpp.o: CMakeFiles/canfd_server.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/home/wang/ZMHT-Project/ZMHT-ZYNQ-CANFD/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_10) "Building CXX object CMakeFiles/canfd_server.dir/src/hardware/fifo_engine.cpp.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/home/wang/ZMHT-Project/ZMHT-ZYNQ-CANFD/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_11) "Building CXX object CMakeFiles/canfd_server.dir/src/hardware/fifo_engine.cpp.o"
 	/home/wang/ZMHT-Tool/gcc-arm-linux-gnueabi/bin/arm-linux-gnueabihf-g++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/canfd_server.dir/src/hardware/fifo_engine.cpp.o -MF CMakeFiles/canfd_server.dir/src/hardware/fifo_engine.cpp.o.d -o CMakeFiles/canfd_server.dir/src/hardware/fifo_engine.cpp.o -c /home/wang/ZMHT-Project/ZMHT-ZYNQ-CANFD/src/hardware/fifo_engine.cpp
 
 CMakeFiles/canfd_server.dir/src/hardware/fifo_engine.cpp.i: cmake_force
@@ -212,7 +226,7 @@ CMakeFiles/canfd_server.dir/src/hardware/fifo_engine.cpp.s: cmake_force
 CMakeFiles/canfd_server.dir/src/hardware/ringbuffer.c.o: CMakeFiles/canfd_server.dir/flags.make
 CMakeFiles/canfd_server.dir/src/hardware/ringbuffer.c.o: ../src/hardware/ringbuffer.c
 CMakeFiles/canfd_server.dir/src/hardware/ringbuffer.c.o: CMakeFiles/canfd_server.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/home/wang/ZMHT-Project/ZMHT-ZYNQ-CANFD/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_11) "Building C object CMakeFiles/canfd_server.dir/src/hardware/ringbuffer.c.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/home/wang/ZMHT-Project/ZMHT-ZYNQ-CANFD/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_12) "Building C object CMakeFiles/canfd_server.dir/src/hardware/ringbuffer.c.o"
 	/home/wang/ZMHT-Tool/gcc-arm-linux-gnueabi/bin/arm-linux-gnueabihf-gcc $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/canfd_server.dir/src/hardware/ringbuffer.c.o -MF CMakeFiles/canfd_server.dir/src/hardware/ringbuffer.c.o.d -o CMakeFiles/canfd_server.dir/src/hardware/ringbuffer.c.o -c /home/wang/ZMHT-Project/ZMHT-ZYNQ-CANFD/src/hardware/ringbuffer.c
 
 CMakeFiles/canfd_server.dir/src/hardware/ringbuffer.c.i: cmake_force
@@ -234,6 +248,7 @@ canfd_server_OBJECTS = \
 "CMakeFiles/canfd_server.dir/src/canfd/canfd_codec.cpp.o" \
 "CMakeFiles/canfd_server.dir/src/canfd/canfd_hw.cpp.o" \
 "CMakeFiles/canfd_server.dir/src/canfd/canfd_service.cpp.o" \
+"CMakeFiles/canfd_server.dir/src/canfd/can_tx_queue.cpp.o" \
 "CMakeFiles/canfd_server.dir/src/hardware/fifo_engine.cpp.o" \
 "CMakeFiles/canfd_server.dir/src/hardware/ringbuffer.c.o"
 
@@ -249,11 +264,12 @@ canfd_server: CMakeFiles/canfd_server.dir/src/canfd/protocol.cpp.o
 canfd_server: CMakeFiles/canfd_server.dir/src/canfd/canfd_codec.cpp.o
 canfd_server: CMakeFiles/canfd_server.dir/src/canfd/canfd_hw.cpp.o
 canfd_server: CMakeFiles/canfd_server.dir/src/canfd/canfd_service.cpp.o
+canfd_server: CMakeFiles/canfd_server.dir/src/canfd/can_tx_queue.cpp.o
 canfd_server: CMakeFiles/canfd_server.dir/src/hardware/fifo_engine.cpp.o
 canfd_server: CMakeFiles/canfd_server.dir/src/hardware/ringbuffer.c.o
 canfd_server: CMakeFiles/canfd_server.dir/build.make
 canfd_server: CMakeFiles/canfd_server.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --bold --progress-dir=/home/wang/ZMHT-Project/ZMHT-ZYNQ-CANFD/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_12) "Linking CXX executable canfd_server"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --bold --progress-dir=/home/wang/ZMHT-Project/ZMHT-ZYNQ-CANFD/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_13) "Linking CXX executable canfd_server"
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/canfd_server.dir/link.txt --verbose=$(VERBOSE)
 
 # Rule to build all files generated by this target.

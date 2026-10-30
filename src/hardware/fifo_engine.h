@@ -8,9 +8,9 @@ extern "C" {
 #include <sys/types.h>
 #include "ringbuffer.h"
 
-#define AXI_FIFO_DATA_SIZE ((16 * 1024 + 1) * 512)
-#define AXI_FIFO_BUF_SIZE (16 * 1024)
 #define AXI_FIFO_BUF_UNIT_SIZE (512)
+#define AXI_FIFO_BUF_SIZE (32 * 1024)
+#define AXI_FIFO_DATA_SIZE (AXI_FIFO_BUF_SIZE * AXI_FIFO_BUF_UNIT_SIZE)
 
 #pragma pack(1)
 typedef struct {

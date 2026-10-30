@@ -1,4 +1,6 @@
 file(REMOVE_RECURSE
+  "CMakeFiles/canfd_server.dir/src/canfd/can_tx_queue.cpp.o"
+  "CMakeFiles/canfd_server.dir/src/canfd/can_tx_queue.cpp.o.d"
   "CMakeFiles/canfd_server.dir/src/canfd/canfd_codec.cpp.o"
   "CMakeFiles/canfd_server.dir/src/canfd/canfd_codec.cpp.o.d"
   "CMakeFiles/canfd_server.dir/src/canfd/canfd_hw.cpp.o"

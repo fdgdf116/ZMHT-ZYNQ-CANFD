@@ -103,7 +103,6 @@ TcpSocket * TcpSocket::Accept(int timeout){
             struct sockaddr_in client_address;
             socklen_t address_len = sizeof(client_address);
             int fd = accept(socket_,(struct sockaddr *)&client_address,&address_len);
-            printf("8.accept client fd = %d ip = %s:%d",fd,inet_ntoa(client_address.sin_addr),ntohs(client_address.sin_port));
             return new TcpSocket(fd);
         }
     }

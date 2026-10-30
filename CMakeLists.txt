@@ -38,6 +38,7 @@ add_executable(${TARGETS}
     src/canfd/canfd_codec.cpp
     src/canfd/canfd_hw.cpp
     src/canfd/canfd_service.cpp
+    src/canfd/can_tx_queue.cpp
     src/hardware/fifo_engine.cpp
     src/hardware/ringbuffer.c
 )

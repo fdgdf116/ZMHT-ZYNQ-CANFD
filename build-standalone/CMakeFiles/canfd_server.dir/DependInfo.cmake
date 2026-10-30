@@ -9,6 +9,7 @@ set(CMAKE_DEPENDS_LANGUAGES
 # The set of dependency files which are needed:
 set(CMAKE_DEPENDS_DEPENDENCY_FILES
   "/home/wang/ZMHT-Project/ZMHT-ZYNQ-CANFD/src/hardware/ringbuffer.c" "CMakeFiles/canfd_server.dir/src/hardware/ringbuffer.c.o" "gcc" "CMakeFiles/canfd_server.dir/src/hardware/ringbuffer.c.o.d"
+  "/home/wang/ZMHT-Project/ZMHT-ZYNQ-CANFD/src/canfd/can_tx_queue.cpp" "CMakeFiles/canfd_server.dir/src/canfd/can_tx_queue.cpp.o" "gcc" "CMakeFiles/canfd_server.dir/src/canfd/can_tx_queue.cpp.o.d"
   "/home/wang/ZMHT-Project/ZMHT-ZYNQ-CANFD/src/canfd/canfd_codec.cpp" "CMakeFiles/canfd_server.dir/src/canfd/canfd_codec.cpp.o" "gcc" "CMakeFiles/canfd_server.dir/src/canfd/canfd_codec.cpp.o.d"
   "/home/wang/ZMHT-Project/ZMHT-ZYNQ-CANFD/src/canfd/canfd_hw.cpp" "CMakeFiles/canfd_server.dir/src/canfd/canfd_hw.cpp.o" "gcc" "CMakeFiles/canfd_server.dir/src/canfd/canfd_hw.cpp.o.d"
   "/home/wang/ZMHT-Project/ZMHT-ZYNQ-CANFD/src/canfd/canfd_service.cpp" "CMakeFiles/canfd_server.dir/src/canfd/canfd_service.cpp.o" "gcc" "CMakeFiles/canfd_server.dir/src/canfd/canfd_service.cpp.o.d"

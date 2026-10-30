@@ -1,8 +1,10 @@
 #include "protocol.h"
+#include "can_tx_queue.h"
 #include "hw.h"
 #include "fifo_engine.h"
 #include "sync_send.h"
 
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
@@ -30,25 +32,6 @@ uint32_t start_stop_channel(const uint8_t* p)
     }
     const uint32_t le = le32(p);
     return le < CANFD_CHANNEL_COUNT ? le : be;
-}
-
-void print_config_frame(const uint8_t* p, uint32_t length, const char* result)
-{
-    std::printf("[CANFD CONFIG] %s\n", result);
-    if (p == nullptr || length < CANFD_FRAME_SIZE) {
-        std::printf("  length : %u (invalid)\n", length);
-        return;
-    }
-    std::printf("  header : 0x%08X (wire %02X %02X %02X %02X)\n",
-                le32(p), p[0], p[1], p[2], p[3]);
-    std::printf("  basic  : dir=%u type=0x%02X length=%u channel=%u\n",
-                p[4], p[5], p[6], p[7]);
-    std::printf("  timing : baud=%u data_baud=%u mode=0x%02X brs=%u\n",
-                le32(p + 16), le32(p + 28), p[20], p[32]);
-    std::printf("  raw    : baud=%02X %02X %02X %02X data_baud=%02X %02X %02X %02X\n",
-                p[16], p[17], p[18], p[19], p[28], p[29], p[30], p[31]);
-    std::printf("  checksum: frame=0x%08X calculated=0x%08X\n",
-                le32(p + 108), canfd_xor(p, 108));
 }
 
 std::mutex g_state_mu;
@@ -161,19 +144,15 @@ bool data_frame_ok(const uint8_t* frame, uint8_t expect_type)
         return false;
     }
     if (le32(frame) != CANFD_INNER_HEAD) {
-        std::printf("[CANFD DATA] reject head wire=%02X %02X %02X %02X value=0x%08X\n", frame[0], frame[1], frame[2], frame[3], le32(frame));
         return false;
     }
     if (frame[4] != 0 || frame[5] != expect_type || frame[6] != CANFD_FRAME_SIZE) {
-        std::printf("[CANFD DATA] reject fields dir=%u type=0x%02X len=%u expect=0x%02X/%u\n", frame[4], frame[5], frame[6], expect_type, CANFD_FRAME_SIZE);
         return false;
     }
     if (frame[7] >= CANFD_CHANNEL_COUNT) {
-        std::printf("[CANFD DATA] reject channel=%u\n", frame[7]);
         return false;
     }
     if (!checksum_ok(frame, CANFD_FRAME_SIZE)) {
-        std::printf("[CANFD DATA] reject checksum wire=%02X %02X %02X %02X\n", frame[108], frame[109], frame[110], frame[111]);
         return false;
     }
     return true;
@@ -213,10 +192,18 @@ int submit_frames(const uint8_t* payload, uint32_t length, uint8_t expect_type)
     int result = 0;
     for (uint32_t i = 0; i < count; ++i) {
         const uint8_t* frame = payload + i * CANFD_FRAME_SIZE;
-        const int rc = canfd_hw_submit_frame(frame[7], expect_type, frame, CANFD_FRAME_SIZE);
-        send_tx_feedback(frame, rc == 0);
+        const int rc = can_tx_queue_push(frame[7], expect_type, frame);
         if (rc != 0) {
-            result = -1;
+            static auto last_queue_error = std::chrono::steady_clock::time_point();
+            const auto now = std::chrono::steady_clock::now();
+            if (last_queue_error.time_since_epoch().count() == 0 ||
+                now - last_queue_error >= std::chrono::seconds(5)) {
+                std::printf("[CANFD 9012] 入队失败：通道=%u，缓冲区已满或已关闭\n",
+                            static_cast<unsigned>(frame[7]));
+                last_queue_error = now;
+            }
+            send_tx_feedback(frame, false);
+            result = -2;
         }
     }
     return result;
@@ -233,6 +220,11 @@ CommandResponse respond_with(const NetHeader& header, std::vector<uint8_t> paylo
 }
 
 }  // namespace
+
+void canfd_send_tx_feedback(const uint8_t* frame, bool ok)
+{
+    send_tx_feedback(frame, ok);
+}
 
 void canfd_put_be16(uint8_t* dest, uint16_t value)
 {
@@ -312,7 +304,9 @@ CommandResponse canfd_cmd_config(const NetHeader& header, const uint8_t* payload
 {
     std::lock_guard<std::mutex> lock(g_state_mu);
     if (!init_packet_ok(payload, length)) {
-        print_config_frame(payload, length, "REJECT");
+        std::printf("[CANFD CMD] config reject ch=%u len=%u\n",
+                    payload != nullptr && length > 7 ? payload[7] : 0xFFu,
+                    length);
         return canfd_cmd_status(header, 0xBB);
     }
     const uint8_t channel = payload[7];
@@ -322,10 +316,6 @@ CommandResponse canfd_cmd_config(const NetHeader& header, const uint8_t* payload
     }
     std::memcpy(g_channels[channel].packet, payload, CANFD_FRAME_SIZE);
     g_channels[channel].configured = true;
-    print_config_frame(payload, length, "ACCEPT");
-    std::printf("[CANFD CMD] config ok ch=%u baud=%u dbitrate=%u mode=0x%02X brs=%u\n",
-                channel, le32(payload + 16), le32(payload + 28),
-                payload[20], payload[32]);
     return canfd_cmd_status(header, 0xAA);
 }
 
@@ -366,7 +356,6 @@ CommandResponse canfd_cmd_start_stop(const NetHeader& header, const uint8_t* pay
         std::printf("[CANFD CMD] run failed ch=%u state=0x%08X\n", channel, state);
         return canfd_cmd_status(header, 1);
     }
-    std::printf("[CANFD CMD] run ok ch=%u state=0x%08X\n", channel, state);
     return canfd_cmd_status(header, 0);
 }
 
@@ -410,10 +399,7 @@ CommandResponse canfd_cmd_version(const NetHeader& header, const uint8_t* payloa
 
 int canfd_data_normal(const uint8_t* payload, uint32_t length)
 {
-    const int rc = submit_frames(payload, length, 0x01);
-    std::printf("[CANFD DATA] normal len=%u frames=%u rc=%d\n", length,
-                length / CANFD_FRAME_SIZE, rc);
-    return rc;
+    return submit_frames(payload, length, 0x01);
 }
 
 int canfd_data_pulse(const uint8_t* payload, uint32_t length)

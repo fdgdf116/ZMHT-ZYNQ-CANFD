@@ -68,6 +68,7 @@ CommandResponse canfd_cmd_version(const NetHeader& header, const uint8_t* payloa
 int canfd_data_normal(const uint8_t* payload, uint32_t length);
 int canfd_data_pulse(const uint8_t* payload, uint32_t length);
 int canfd_data_simulator(const uint8_t* payload, uint32_t length);
+void canfd_send_tx_feedback(const uint8_t* frame, bool ok);
 
 CommandResponse canfd_handle_command(const NetHeader& header, const uint8_t* payload, uint32_t length);
 int canfd_handle_downlink(const NetHeader& header, const uint8_t* payload, uint32_t length);

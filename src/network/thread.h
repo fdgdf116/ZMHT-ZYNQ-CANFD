@@ -210,7 +210,6 @@ bool Thread::Run(void (T::*method)(Thread *thread), T *instance, int priority/* 
 	if (pthread_getschedparam(thread_, &policy, &param) != 0) {
 		printf("pthread_getschedparam failed\n");
 	} else {
-		printf("new thread:%lu;policy:%d;priority:%d\n", thread_, policy, param.sched_priority);
 	}
 
 	return alive_;

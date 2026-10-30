@@ -148,23 +148,6 @@ int NetServer::SendCommandResponse(const CommandResponse& response)
     // 9009 only receives. The reply leaves on 9010 and is dropped if nobody is connected.
     int ret = canfd_send_response(response.index, response.count, response.time,
                                   body, static_cast<uint32_t>(response.payload.size()));
-    unsigned status = 0xFFFFFFFFu;
-    if (response.payload.size() == 4 && body != nullptr) {
-        const uint8_t* p = static_cast<const uint8_t*>(body);
-        status = static_cast<unsigned>(p[0]) |
-                 (static_cast<unsigned>(p[1]) << 8) |
-                 (static_cast<unsigned>(p[2]) << 16) |
-                 (static_cast<unsigned>(p[3]) << 24);
-    }
-    const char* status_text = "n/a";
-    if (status != 0xFFFFFFFFu) {
-        status_text = (status == 0 || status == 0xAA) ? "OK" :
-                      ((status == 1 || status == 0xBB) ? "FAIL" : "UNKNOWN");
-    }
-    printf("[CANFD RESP] port=%d index=0x%04X count=%u len=%u status=%s(0x%08X) rc=%d\n",
-           port_, response.index, response.count,
-           static_cast<unsigned>(response.payload.size()),
-           status_text, status, ret);
     if (ret != 0 && port_ == CMD_PORT) {
         printf("[CANFD] port %d response dropped, 9010 has no client\n", port_);
     }
@@ -217,12 +200,11 @@ int NetServer::SendCapacityReport()
 
 void NetServer::CapacityReportLoop()
 {
-    std::this_thread::sleep_for(std::chrono::seconds(5));
     while (!report_stop_) {
         if (port_ == DATA_DOWN_PORT && client_ != nullptr) {
             (void)SendCapacityReport();
         }
-        std::this_thread::sleep_for(std::chrono::microseconds(500));
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 }
 
@@ -254,9 +236,15 @@ int NetServer::DataProcMessage(char* msg)
     while (map_entry->index != 0) {
         if (map_entry->index == request->index) {
             int rc = (this->*map_entry->func)(request);
-            if (rc != 0) {
-                printf("[CANFD 9012] reject index=0x%04X length=%u\n",
-                       request->index, static_cast<unsigned>(request->length));
+            if (rc != 0 && rc != -2) {
+                static auto last_reject = std::chrono::steady_clock::time_point();
+                const auto now = std::chrono::steady_clock::now();
+                if (last_reject.time_since_epoch().count() == 0 ||
+                    now - last_reject >= std::chrono::seconds(1)) {
+                    printf("[CANFD 9012] reject index=0x%04X length=%u\n",
+                           request->index, static_cast<unsigned>(request->length));
+                    last_reject = now;
+                }
             }
             return rc;
         }
@@ -367,7 +355,7 @@ void NetServer::ReceiveLoop(Thread* thread, uint32_t expect_code, uint32_t max_p
                 client_->SetRecvTimeout(0);
                 client_->SetSendTimeout(3000);
                 client_->set_keepalive(3, 3, 3);
-                printf("[CANFD] client connected on port %d\n", port_);
+                printf("[CANFD] %d client connected\n", port_);
             }
         }
         if (client_ == nullptr) {
@@ -381,7 +369,7 @@ void NetServer::ReceiveLoop(Thread* thread, uint32_t expect_code, uint32_t max_p
         char recv_buf[DATA_HEADER_SIZE] = {0};
         int ret = client_->RecvFully(recv_buf, wire_header_size);
         if (ret <= 0) {
-            printf("[CANFD] client left port %d\n", port_);
+            printf("[CANFD] %d client disconnected\n", port_);
             DropClient();
             continue;
         }
@@ -408,7 +396,7 @@ void NetServer::ReceiveLoop(Thread* thread, uint32_t expect_code, uint32_t max_p
         if (static_cast<uint32_t>(req_head->cmd_code) != expect_code ||
             req_head->length < 0 ||
             static_cast<uint32_t>(req_head->length) > max_payload) {
-            printf("[CANFD] port %d close, code=0x%08X length=%u\n",
+            printf("[CANFD] %d reject code=0x%08X length=%u\n",
                    port_, static_cast<unsigned>(req_head->cmd_code),
                    static_cast<unsigned>(req_head->length));
             DropClient();
@@ -419,7 +407,7 @@ void NetServer::ReceiveLoop(Thread* thread, uint32_t expect_code, uint32_t max_p
         memcpy(msg.data(), recv_buf, sizeof(Request));
         if (req_head->length > 0 &&
             !client_->RecvFully(msg.data() + sizeof(Request), req_head->length)) {
-            printf("[CANFD] client left port %d during payload\n", port_);
+            printf("[CANFD] %d client disconnected during payload\n", port_);
             DropClient();
             continue;
         }

@@ -129,6 +129,30 @@ canfd_server/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/canfd_server.dir/build.make CMakeFiles/canfd_server.dir/build
 .PHONY : canfd_server/fast
 
+src/canfd/can_tx_queue.o: src/canfd/can_tx_queue.cpp.o
+.PHONY : src/canfd/can_tx_queue.o
+
+# target to build an object file
+src/canfd/can_tx_queue.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/canfd_server.dir/build.make CMakeFiles/canfd_server.dir/src/canfd/can_tx_queue.cpp.o
+.PHONY : src/canfd/can_tx_queue.cpp.o
+
+src/canfd/can_tx_queue.i: src/canfd/can_tx_queue.cpp.i
+.PHONY : src/canfd/can_tx_queue.i
+
+# target to preprocess a source file
+src/canfd/can_tx_queue.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/canfd_server.dir/build.make CMakeFiles/canfd_server.dir/src/canfd/can_tx_queue.cpp.i
+.PHONY : src/canfd/can_tx_queue.cpp.i
+
+src/canfd/can_tx_queue.s: src/canfd/can_tx_queue.cpp.s
+.PHONY : src/canfd/can_tx_queue.s
+
+# target to generate assembly for a file
+src/canfd/can_tx_queue.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/canfd_server.dir/build.make CMakeFiles/canfd_server.dir/src/canfd/can_tx_queue.cpp.s
+.PHONY : src/canfd/can_tx_queue.cpp.s
+
 src/canfd/canfd_codec.o: src/canfd/canfd_codec.cpp.o
 .PHONY : src/canfd/canfd_codec.o
 
@@ -402,6 +426,9 @@ help:
 	@echo "... edit_cache"
 	@echo "... rebuild_cache"
 	@echo "... canfd_server"
+	@echo "... src/canfd/can_tx_queue.o"
+	@echo "... src/canfd/can_tx_queue.i"
+	@echo "... src/canfd/can_tx_queue.s"
 	@echo "... src/canfd/canfd_codec.o"
 	@echo "... src/canfd/canfd_codec.i"
 	@echo "... src/canfd/canfd_codec.s"

@@ -1,6 +1,7 @@
 #include "canfd_service.h"
 
 #include "canfd_codec.h"
+#include "can_tx_queue.h"
 #include "fifo_engine.h"
 #include "hw.h"
 #include "network_main.h"
@@ -87,8 +88,8 @@ void cleanup_locked()
     g_data_server = nullptr;
     delete g_cmd_server;
     g_cmd_server = nullptr;
-    network::SyncSend::GetInstance()->DeInit();
     axififo_data_destory();
+    network::SyncSend::GetInstance()->DeInit();
     canfd_hw_stop();
     g_running = false;
 }
@@ -206,7 +207,7 @@ extern "C" int canfd_service_send(uint8_t channel,
     write_be64(packet + 100, now_us());
     canfd_put_be32(packet + 108, canfd_xor(packet, 108));
 
-    const int rc = canfd_hw_submit_frame(channel, 0x01, packet, CANFD_FRAME_SIZE);
+    const int rc = can_tx_queue_push(channel, 0x01, packet);
     if (tx_state != nullptr) {
         *tx_state = rc == 0 ? 1 : 0;
     }

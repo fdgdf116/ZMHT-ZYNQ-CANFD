@@ -61,6 +61,7 @@ struct ChannelHw {
 ChannelHw g_ch[kChannelCount];
 pthread_mutex_t g_count_lock = PTHREAD_MUTEX_INITIALIZER;
 uint32_t g_total_count = 0;
+uint64_t g_last_tx_error_us[kChannelCount] = {};
 int g_any_interface = 0;
 bool g_started = false;
 pthread_mutex_t g_rx_cb_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -75,6 +76,24 @@ uint64_t now_us()
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return static_cast<uint64_t>(ts.tv_sec) * 1000000ULL +
            static_cast<uint64_t>(ts.tv_nsec) / 1000ULL;
+}
+
+uint64_t frame_bus_time_us(const ChannelHw& channel, const canfd_message_t& msg)
+{
+    const uint64_t baud = channel.baud == 0 ? 1 : channel.baud;
+    uint64_t total_us = 0;
+    if (msg.fd) {
+        const uint64_t arbitration_bits = 64;
+        const uint64_t data_bits = 48 + static_cast<uint64_t>(msg.len) * 8;
+        const uint64_t data_baud =
+            (msg.brs && channel.data_baud != 0) ? channel.data_baud : baud;
+        total_us = arbitration_bits * 1000000ULL / baud +
+                   data_bits * 1000000ULL / data_baud;
+    } else {
+        const uint64_t frame_bits = 48 + static_cast<uint64_t>(msg.len) * 8;
+        total_us = frame_bits * 1000000ULL / baud;
+    }
+    return total_us + total_us / 10 + 1;
 }
 
 void write_be64(uint8_t* dest, uint64_t value)
@@ -94,16 +113,6 @@ void reverse_data_words(uint8_t* data, size_t len)
         data[i + 2] = b1;
         data[i + 3] = b0;
     }
-}
-
-void dump_hex(const char* tag, const uint8_t* data, size_t len)
-{
-    printf("%s (%u bytes):", tag, static_cast<unsigned>(len));
-    for (size_t i = 0; i < len; ++i) {
-        if ((i % 16) == 0) printf("\n  ");
-        printf("%02X ", data[i]);
-    }
-    printf("\n");
 }
 
 const char* iface_name(uint8_t channel, char* buf, size_t size)
@@ -137,34 +146,37 @@ int configure_interface(uint8_t channel, const ChannelHw& cfg)
 
     const uint32_t dbitrate = cfg.data_baud ? cfg.data_baud : cfg.baud;
     const char* loopback = (cfg.mode == 0x04) ? " loopback on" : "";
+    const double nominal_sample_point = 0.800;
+    const double data_sample_point =
+        dbitrate == 5000000u ? 0.750 : 0.800;
 
     snprintf(cmd, sizeof(cmd), "ip link set %s down 2>/dev/null", iface);
     if (system(cmd) != 0) {
         printf("[CANFD] %s down failed\n", iface);
     }
 
-    /* Match the ground-station timing first (80% on both segments), then
-     * fall back to the previously board-tested points and finally let the
+    /* Match the ground-station presets first (80%, except 75% for 5 Mbit/s
+     * data), then fall back to the board-tested points and finally let the
      * driver calculate its own timing. */
     snprintf(cmd, sizeof(cmd),
-             "ip link set %s type can bitrate %u sample-point 0.800 "
-             "dbitrate %u dsample-point 0.800 fd on%s",
-             iface, cfg.baud, dbitrate, loopback);
-    printf("[CANFD] configure: %s\n", cmd);
+             "ip link set %s type can bitrate %u sample-point %.3f "
+             "dbitrate %u dsample-point %.3f fd on restart-ms 100%s",
+             iface, cfg.baud, nominal_sample_point, dbitrate,
+             data_sample_point, loopback);
     int rc = system(cmd);
     if (rc != 0) {
         snprintf(cmd, sizeof(cmd),
                  "ip link set %s type can bitrate %u sample-point 0.875 "
-                 "dbitrate %u dsample-point 0.750 fd on%s",
+                 "dbitrate %u dsample-point 0.750 fd on restart-ms 100%s",
                  iface, cfg.baud, dbitrate, loopback);
-        printf("[CANFD] configure fallback: %s\n", cmd);
+        printf("[CANFD] %s first timing rejected, retrying 87.5%%/75%%\n", iface);
         rc = system(cmd);
     }
     if (rc != 0) {
         snprintf(cmd, sizeof(cmd),
                  "ip link set %s type can bitrate %u dbitrate %u fd on%s",
                  iface, cfg.baud, dbitrate, loopback);
-        printf("[CANFD] configure fallback: %s\n", cmd);
+        printf("[CANFD] %s timing rejected, using driver defaults\n", iface);
         rc = system(cmd);
     }
     if (rc != 0) {
@@ -178,7 +190,7 @@ int configure_interface(uint8_t channel, const ChannelHw& cfg)
         printf("[CANFD] %s up failed\n", iface);
         return -1;
     }
-    printf("[CANFD] %s configured bitrate=%u dbitrate=%u fd=%s brs=%u mode=0x%02X\n",
+    printf("[CANFD] %s configured %u/%u bit/s fd=%s brs=%u mode=0x%02X\n",
            iface, cfg.baud, dbitrate, dbitrate ? "on" : "off",
            static_cast<unsigned>(cfg.brs_en), static_cast<unsigned>(cfg.mode));
     return 0;
@@ -278,10 +290,6 @@ void* rx_thread_main(void* arg)
         if (cb != nullptr) {
             cb(channel, &msg, user);
         }
-        printf("[CANFD RX] ch=%u id=0x%X len=%u %s%s\n",
-               channel, msg.can_id, msg.len, msg.fd ? "FD " : "CAN ",
-               msg.brs ? "BRS" : "");
-        dump_hex("[CANFD RX DATA]", msg.data, msg.len);
         uint8_t packet[CANFD_FRAME_SIZE];
         fill_rx_packet(channel, msg, packet);
         /* The encoded 112-byte uplink packet is protocol transport data and
@@ -321,13 +329,15 @@ extern "C" int canfd_hw_start(void)
         g_ch[i].fd = -1;
         if (iface_present(static_cast<uint8_t>(i))) {
             g_any_interface = 1;
+            printf("[CANFD] can%d 接口已检测到\n", i);
         } else {
             g_ch[i].stub = true;
+            printf("[CANFD] can%d 接口不存在，使用模拟模式\n", i);
         }
     }
     g_started = true;
-    printf("[CANFD] hardware layer ready (%s)\n",
-           g_any_interface ? "SocketCAN" : "stub, no canX interface");
+    printf("[CANFD] CAN FD 硬件层初始化完成（%s）\n",
+           g_any_interface ? "SocketCAN" : "无可用的 canX 接口");
     return 0;
 }
 
@@ -474,17 +484,18 @@ extern "C" int canfd_hw_submit_frame(uint8_t channel, uint8_t type, const uint8_
                static_cast<unsigned>(msg.brs));
         return 0;
     }
-    printf("[CANFD TX] ch=%u type=0x%02X id=0x%X len=%u fd=%u brs=%u\n",
-           channel, type, msg.can_id, msg.len, msg.fd, msg.brs);
     if (!ch->running) {
         return -1;
     }
 
-    if (ch->packet_interval != 0 && ch->last_tx_us != 0) {
+    const uint64_t bus_interval = frame_bus_time_us(*ch, msg);
+    const uint64_t tx_interval =
+        ch->packet_interval > bus_interval ? ch->packet_interval : bus_interval;
+    if (ch->last_tx_us != 0) {
         const uint64_t now = now_us();
         const uint64_t elapsed = now - ch->last_tx_us;
-        if (elapsed < ch->packet_interval) {
-            usleep(static_cast<useconds_t>(ch->packet_interval - elapsed));
+        if (elapsed < tx_interval) {
+            usleep(static_cast<useconds_t>(tx_interval - elapsed));
         }
     }
 
@@ -513,8 +524,14 @@ extern "C" int canfd_hw_submit_frame(uint8_t channel, uint8_t type, const uint8_
     ch->last_tx_us = now_us();
     const int expected = msg.fd ? static_cast<int>(CANFD_MTU) : static_cast<int>(CAN_MTU);
     if (written != expected) {
-        printf("[CANFD] can%u write failed: %s\n",
-               static_cast<unsigned>(channel), strerror(errno));
+        const int write_error = written < 0 ? errno : EIO;
+        const uint64_t failed_at = now_us();
+        if (write_error != ENOBUFS || g_last_tx_error_us[channel] == 0 ||
+            failed_at - g_last_tx_error_us[channel] >= 1000000ULL) {
+            printf("[CANFD] can%u write failed: %s\n",
+                   static_cast<unsigned>(channel), strerror(write_error));
+            g_last_tx_error_us[channel] = failed_at;
+        }
         return -1;
     }
     return 0;
@@ -528,6 +545,13 @@ extern "C" int canfd_hw_submit_simulator(uint8_t channel, const uint8_t* packet,
            static_cast<unsigned>(channel), length);
     (void)packet;
     return 0;
+}
+
+extern "C" int canfd_hw_channel_is_open(uint8_t channel)
+{
+    if (channel >= kChannelCount) return 0;
+    return g_ch[channel].running ||
+           (g_ch[channel].stub && g_ch[channel].configured);
 }
 
 extern "C" int canfd_hw_is_stub(void)
